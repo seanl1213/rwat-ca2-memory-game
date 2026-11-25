@@ -1,5 +1,11 @@
-
 import { ShapeCard } from './shapecard.js';
+import { db } from './firebase.js';
+import {
+    collection,
+    addDoc,
+    getDocs,
+    serverTimestamp
+} from 'firebase/firestore';
 
 // Custom element that manages the memory card game
 class MemoryGame extends HTMLElement {
@@ -12,10 +18,12 @@ class MemoryGame extends HTMLElement {
         this.lockBoard = false;
         this.clicks = 0;
         this.matchedPairs = 0;
+        this.gameCompleted = false;
     }
 
     connectedCallback() {
-        // Read the board dimensions from the size attribute
+
+        // Read board dimensions from the size attribute
         const size = this.getAttribute('size');
         const dimensions = size?.toLowerCase().split('x').map(Number);
 
@@ -31,7 +39,7 @@ class MemoryGame extends HTMLElement {
         const [rows, columns] = dimensions;
         const totalCards = rows * columns;
 
-        // The board must contain an even number of cards
+        // Check that the board has a valid number of cards
         if (totalCards % 2 !== 0 || totalCards / 2 > 18) {
             this.textContent = 'Invalid board size.';
             return;
@@ -87,6 +95,12 @@ class MemoryGame extends HTMLElement {
                 </div>
 
                 <p class="status" id="status">Game in progress</p>
+
+                <button id="average-button">
+                    Show average clicks
+                </button>
+
+                <p id="average-result"></p>
             </div>
         `;
 
@@ -96,6 +110,11 @@ class MemoryGame extends HTMLElement {
                 this.handleCardClick(card);
             });
         });
+
+        // Add listener for average clicks button
+        this.querySelector('#average-button').addEventListener('click', () => {
+            this.showAverageClicks();
+        });
     }
 
     handleCardClick(card) {
@@ -103,21 +122,22 @@ class MemoryGame extends HTMLElement {
         // Ignore clicks when the board is locked or card is already revealed
         if (
             this.lockBoard ||
+            this.gameCompleted ||
             card.isFaceUp() ||
             card.dataset.matched === 'true'
         ) {
             return;
         }
 
-        // Reveal the selected card
+        // Reveal selected card
         card.flip();
 
         this.clicks++;
 
-        // Update the click counter
+        // Update click counter
         this.querySelector('#click-count').textContent = this.clicks;
 
-        // Store the first selected card
+        // Store first selected card
         if (!this.firstCard) {
             this.firstCard = card;
             return;
@@ -142,18 +162,17 @@ class MemoryGame extends HTMLElement {
 
             // Check whether all pairs have been found
             if (this.matchedPairs === this.totalPairs) {
-                this.querySelector('#status').textContent =
-                    `Congratulations! You completed the game in ${this.clicks} clicks!`;
+                this.gameCompleted = true;
+                this.completeGame();
             }
 
         } else {
 
-            // Prevent further clicks while mismatched cards are visible
+            // Lock the board while mismatched cards are visible
             this.lockBoard = true;
 
             setTimeout(() => {
 
-                // Turn both cards face down again
                 first.flip();
                 second.flip();
 
@@ -163,8 +182,73 @@ class MemoryGame extends HTMLElement {
             }, 1000);
         }
     }
+
+    // Save completed game result to Firestore
+    async completeGame() {
+
+        this.querySelector('#status').textContent =
+            `Congratulations! Completed in ${this.clicks} clicks. Saving result...`;
+
+        try {
+
+            await addDoc(collection(db, 'gameResults'), {
+                clicks: this.clicks,
+                completedAt: serverTimestamp()
+            });
+
+            this.querySelector('#status').textContent =
+                `Congratulations! Completed in ${this.clicks} clicks. Result saved!`;
+
+        } catch (error) {
+
+            console.error('Error saving game result:', error);
+
+            this.querySelector('#status').textContent =
+                'Game completed, but the result could not be saved.';
+        }
+    }
+
+    // Retrieve results and calculate average clicks
+    async showAverageClicks() {
+
+        const resultElement = this.querySelector('#average-result');
+
+        resultElement.textContent = 'Calculating average...';
+
+        try {
+
+            const querySnapshot = await getDocs(
+                collection(db, 'gameResults')
+            );
+
+            if (querySnapshot.empty) {
+                resultElement.textContent = 'No completed games recorded yet.';
+                return;
+            }
+
+            // Calculate total clicks
+            let totalClicks = 0;
+
+            querySnapshot.forEach(document => {
+                totalClicks += document.data().clicks;
+            });
+
+            // Calculate average
+            const average = totalClicks / querySnapshot.size;
+
+            resultElement.textContent =
+                `Average clicks: ${average.toFixed(2)} (${querySnapshot.size} games)`;
+
+        } catch (error) {
+
+            console.error('Error retrieving game results:', error);
+
+            resultElement.textContent =
+                'Unable to retrieve game results.';
+        }
+    }
 }
 
-// Register the custom HTML element
+// Register custom HTML element
 customElements.define('memory-game', MemoryGame);
 
