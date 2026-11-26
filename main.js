@@ -6,6 +6,9 @@ import {
     getDocs,
     serverTimestamp
 } from 'firebase/firestore';
+import gameLogic from './gameLogic.cjs';
+
+const { parseBoardDimensions, isValidBoard, cardsMatch } = gameLogic;
 
 // Custom element that manages the memory card game
 class MemoryGame extends HTMLElement {
@@ -22,32 +25,25 @@ class MemoryGame extends HTMLElement {
     }
 
     connectedCallback() {
-
-        // Read board dimensions from the size attribute
+        // Read and validate board dimensions
         const size = this.getAttribute('size');
-        const dimensions = size?.toLowerCase().split('x').map(Number);
+        const dimensions = parseBoardDimensions(size);
 
-        if (
-            !dimensions ||
-            dimensions.length !== 2 ||
-            dimensions.some(n => !Number.isInteger(n) || n < 1)
-        ) {
+        if (!dimensions) {
             this.textContent = 'Invalid board dimensions.';
             return;
         }
 
         const [rows, columns] = dimensions;
-        const totalCards = rows * columns;
 
         // Check that the board has a valid number of cards
-        if (totalCards % 2 !== 0 || totalCards / 2 > 18) {
+        if (!isValidBoard(rows, columns)) {
             this.textContent = 'Invalid board size.';
             return;
         }
 
-        this.totalPairs = totalCards / 2;
-
-        this.renderBoard(rows, columns);
+        this.totalPairs = (rows * columns) / 2;
+        this.renderBoard(rows, columns);        
     }
 
     renderBoard(rows, columns) {
@@ -147,9 +143,17 @@ class MemoryGame extends HTMLElement {
         const first = this.firstCard;
         const second = card;
 
-        const isMatch =
-            first.getAttribute('type') === second.getAttribute('type') &&
-            first.getAttribute('colour') === second.getAttribute('colour');
+        // Compare the shape and colour of both cards
+        const isMatch = cardsMatch(
+            {
+                type: first.getAttribute('type'),
+                colour: first.getAttribute('colour')
+            },
+            {
+                type: second.getAttribute('type'),
+                colour: second.getAttribute('colour')
+            }
+        );
 
         if (isMatch) {
 
